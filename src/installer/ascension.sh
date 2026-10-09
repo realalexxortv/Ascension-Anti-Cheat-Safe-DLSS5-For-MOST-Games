@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ascension — install Lecram's DLSS 5 neural mod for AION 2 on Linux.
+# Ascension — turn on Lecram's DLSS 5 layer for Steam games on Linux.
 # The game directory is never written. The mod DLL stays with the Vulkan helper.
 set -euo pipefail
 
@@ -13,6 +13,9 @@ MODE="install"
 STEAM_ROOTS=()
 GAME_ROOTS=()
 VDF_FILES=()
+SELECTED_IDS=()
+CLEAR_IDS=()
+GAMES_TSV=""
 LAUNCH_PREFIX=""
 LAYER_TAG="$PINNED_TAG"
 DLL_PATH=""
@@ -22,16 +25,17 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Ascension — Lecram's DLSS 5 mod for AION 2 on Linux.
+Ascension — Lecram's DLSS 5 layer for Steam games on Linux.
 
 The game folder is never modified. DLSS5VKLayer presents frames to a helper
-that lives under your home directory. NC Guard's file check stays quiet
-because nothing is added next to the game. This does not disable, hide from,
-or patch anti-cheat. The layer still loads in the game process.
+that lives under your home directory. You pick installed Steam games in a
+window. Each ticked game gets a launch option and nothing else. This does
+not disable, hide from, or patch anti-cheat. The layer still loads in the
+game process.
 
-  ascension              install or re-apply
+  ascension              pick games, install or re-apply
   ascension --dry-run    print the plan, change nothing
-  ascension --remove     drop the AION 2 launch option and stop the helper
+  ascension --remove     drop the launch option from every ticked game
   ascension --purge      --remove, then uninstall the layer
   ascension --help
 
@@ -70,7 +74,7 @@ assert_outside_game() {
     [ -n "$g" ] || continue
     case "$resolved" in
       "$g" | "$g"/*)
-        die "refusing to write inside the AION 2 folder: $resolved"
+        die "refusing to write inside a game folder: $resolved"
         ;;
     esac
   done
@@ -94,7 +98,6 @@ add_game_root() {
     [ "$existing" = "$game" ] && return 0
   done
   GAME_ROOTS+=("$game")
-  say "AION 2 folder (not written): $game"
 }
 
 add_vdf() {
@@ -107,22 +110,56 @@ add_vdf() {
   VDF_FILES+=("$f")
 }
 
-note_library() {
-  local lib="$1" manifest installdir game
-  [ -d "$lib" ] || return 0
-  manifest="$lib/steamapps/appmanifest_${APPID}.acf"
-  [ -f "$manifest" ] || return 0
-  installdir=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1)
-  [ -n "$installdir" ] || return 0
-  game="$lib/steamapps/common/$installdir"
-  if [ -d "$game" ]; then
-    game=$(readlink -f "$game")
+picker_py() {
+  local self dir candidate
+  if [ -n "${APPDIR:-}" ] && [ -f "$APPDIR/usr/share/ascension/picker.py" ]; then
+    printf '%s\n' "$APPDIR/usr/share/ascension/picker.py"
+    return 0
   fi
-  add_game_root "$game"
+  if [ -n "${0:-}" ] && [ -f "$0" ]; then
+    self=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    dir=$(dirname "$self")
+    for candidate in "$dir/picker.py" "$dir/../share/ascension/picker.py"; do
+      if [ -f "$candidate" ]; then
+        readlink -f "$candidate"
+        return 0
+      fi
+    done
+  fi
+  if [ -f "$HOME/.local/share/ascension/picker.py" ]; then
+    printf '%s\n' "$HOME/.local/share/ascension/picker.py"
+    return 0
+  fi
+  return 1
+}
+
+enabled_file() { printf '%s\n' "$HOME/.local/share/ascension/enabled-games"; }
+
+list_installed_games() {
+  local py root line appid name dir flag count
+  local -a args=()
+  py=$(picker_py) || die "picker.py is missing"
+  for root in "${STEAM_ROOTS[@]+"${STEAM_ROOTS[@]}"}"; do
+    args+=(--root "$root")
+  done
+  GAMES_TSV=$(mktemp)
+  python3 "$py" list "${args[@]+"${args[@]}"}" > "$GAMES_TSV"
+  while IFS=$'\t' read -r appid name dir flag; do
+    [ -n "${appid:-}" ] || continue
+    if [ -n "${dir:-}" ] && [ -d "$dir" ]; then
+      add_game_root "$dir"
+    fi
+  done < "$GAMES_TSV"
+  count=$(grep -c '^[0-9]' "$GAMES_TSV" || true)
+  if [ "$count" -eq 0 ]; then
+    say "No installed Steam games were found."
+  else
+    say "$count installed Steam game(s). None of their folders will be written."
+  fi
 }
 
 discover_steam() {
-  local c root lib vdf line paths
+  local c root vdf line paths
   STEAM_ROOTS=()
   GAME_ROOTS=()
   VDF_FILES=()
@@ -139,10 +176,10 @@ discover_steam() {
       paths=$(sed -n 's/^[[:space:]]*"path"[[:space:]]*"\([^"]*\)".*/\1/p' "$root/steamapps/libraryfolders.vdf")
       while IFS= read -r line; do
         [ -n "$line" ] || continue
-        note_library "$line"
+        line=${line//\\\\/\\}
+        add_unique_root "$line"
       done <<< "$paths"
     fi
-    note_library "$root"
     for vdf in "$root"/userdata/[0-9]*/config/localconfig.vdf; do
       add_vdf "$vdf"
     done
@@ -150,9 +187,7 @@ discover_steam() {
   if [ "${#STEAM_ROOTS[@]}" -eq 0 ]; then
     say "Steam was not found for this user."
   fi
-  if [ "${#GAME_ROOTS[@]}" -eq 0 ]; then
-    say "AION 2 (app $APPID) is not installed yet. The launch option is still set if Steam's config is here."
-  fi
+  list_installed_games
 }
 
 import_dir() { printf '%s\n' "$HOME/.local/share/ascension/import"; }
@@ -247,19 +282,25 @@ find_dll() {
 }
 
 vdf_patch() {
-  local file="$1" mode="$2" result status
+  local file="$1" set_csv="$2" clear_csv="$3" result status
   assert_outside_game "$file"
   if [ "$DRY" -eq 1 ]; then
-    say "would $mode the AION 2 launch option in $file"
+    if [ -n "$set_csv" ]; then
+      say "would turn the layer on for $set_csv in $file"
+    fi
+    if [ -n "$clear_csv" ]; then
+      say "would turn the layer off for $clear_csv in $file"
+    fi
+    [ -n "$set_csv" ] || [ -n "$clear_csv" ] || say "would leave $file unchanged"
     return 0
   fi
   mkdir -p "$(backup_dir)"
   cp -a "$file" "$(backup_dir)/$(basename "$(dirname "$(dirname "$file")")")-localconfig.vdf"
   set +e
-  result=$(python3 - "$file" "$APPID" "$mode" "$LAUNCH_PREFIX" <<'PY'
+  result=$(python3 - "$file" "$LAUNCH_PREFIX" "$set_csv" "$clear_csv" <<'PY'
 import pathlib, re, sys
 
-path, appid, mode, prefix = sys.argv[1:5]
+path, prefix, set_csv, clear_csv = sys.argv[1:5]
 file = pathlib.Path(path)
 raw = file.read_bytes()
 if b"\x00" in raw:
@@ -381,83 +422,129 @@ def merge_clear(existing):
         return "", True
     return s, s != existing.strip()
 
-parser = P(text)
-top = []
-try:
+def parse_top(text):
+    parser = P(text)
+    top = []
     while True:
         parser.skip()
         if parser.i >= parser.n:
             break
         key = parser.string()
         top.append((key, parser.value()))
+    return top
+
+def apps_object(top):
+    found = find_apps(top, [])
+    if not found:
+        return None
+    found.sort(key=lambda item: item[0], reverse=True)
+    return found[0][1]
+
+def launch_of(app_val):
+    for key, val in app_val[3]:
+        if key == "LaunchOptions" and val[0] == "str":
+            return val
+    return None
+
+def edits_for(text, appid, mode):
+    top = parse_top(text)
+    apps = apps_object(top)
+    if apps is None:
+        raise ParseError("no apps section")
+    app_val = None
+    for key, val in apps[3]:
+        if key == appid and val[0] == "obj":
+            app_val = val
+            break
+    if app_val is None:
+        if mode != "set":
+            return []
+        block = (
+            '\n\t\t"%s"\n\t\t{\n\t\t\t"LaunchOptions"\t\t"%s"\n\t\t}\n'
+            % (appid, escape(prefix + " %command%"))
+        )
+        return [("insert", apps[2] - 1, apps[2] - 1, block)]
+    launch = launch_of(app_val)
+    if launch is None:
+        if mode != "set":
+            return []
+        line = '\n\t\t\t"LaunchOptions"\t\t"%s"\n' % escape(prefix + " %command%")
+        return [("insert", app_val[2] - 1, app_val[2] - 1, line)]
+    existing = unescape(text[launch[1] + 1 : launch[2] - 1])
+    if mode == "set":
+        merged, did = merge_set(existing, prefix)
+    else:
+        merged, did = merge_clear(existing)
+    if not did:
+        return []
+    if merged == "":
+        key_at = text.rfind('"LaunchOptions"', app_val[1], launch[1])
+        if key_at < 0:
+            raise ParseError("launch key")
+        line_start = text.rfind("\n", app_val[1], key_at)
+        if line_start < 0:
+            line_start = key_at
+        return [("replace", line_start, launch[2], "")]
+    return [("replace", launch[1] + 1, launch[2] - 1, escape(merged))]
+
+def marked_ids(text):
+    top = parse_top(text)
+    apps = apps_object(top)
+    if apps is None:
+        return []
+    found = []
+    for key, val in apps[3]:
+        if val[0] != "obj" or not key.isdigit():
+            continue
+        launch = launch_of(val)
+        if launch is None:
+            continue
+        existing = unescape(text[launch[1] + 1 : launch[2] - 1])
+        if "VKLAYER_DLSS5=" in existing.upper():
+            found.append(key)
+    return found
+
+def apply_edits(text, edits):
+    if not edits:
+        return text
+    edits.sort(key=lambda item: item[1], reverse=True)
+    for kind, start, end, payload in edits:
+        if kind == "insert":
+            text = text[:start] + payload + text[start:]
+        else:
+            text = text[:start] + payload + text[end:]
+    return text
+
+set_ids = [part for part in set_csv.split(",") if part.isdigit()]
+clear_spec = [part for part in clear_csv.split(",") if part.isdigit() or part == "*"]
+snapshot = raw.decode("utf-8")
+if snapshot.startswith("\ufeff"):
+    snapshot = snapshot[1:]
+text = snapshot
+try:
+    clear_ids = []
+    if "*" in clear_spec:
+        clear_ids.extend(marked_ids(text))
+    for part in clear_spec:
+        if part.isdigit() and part not in clear_ids:
+            clear_ids.append(part)
+    for appid in clear_ids:
+        text = apply_edits(text, edits_for(text, appid, "clear"))
+    for appid in set_ids:
+        if appid in clear_ids:
+            continue
+        text = apply_edits(text, edits_for(text, appid, "set"))
 except ParseError as exc:
     print("skipped-shape %s" % exc)
     sys.exit(3)
 
-found = find_apps(top, [])
-if not found:
-    print("skipped-shape no apps section")
-    sys.exit(3)
-found.sort(key=lambda item: item[0], reverse=True)
-apps = found[0][1]
-app_val = None
-for key, val in apps[3]:
-    if key == appid and val[0] == "obj":
-        app_val = val
-        break
-
-def write(new):
-    tmp = file.with_name(file.name + ".ascension-tmp")
-    tmp.write_text(new, encoding="utf-8")
-    tmp.replace(file)
-    print("updated")
-
-if app_val is None:
-    if mode == "clear":
-        print("unchanged")
-        sys.exit(0)
-    block = (
-        '\n\t\t"%s"\n\t\t{\n\t\t\t"LaunchOptions"\t\t"%s"\n\t\t}\n'
-        % (appid, escape(prefix + " %command%"))
-    )
-    insert_at = apps[2] - 1
-    write(text[:insert_at] + block + text[insert_at:])
-    sys.exit(0)
-
-launch = None
-for key, val in app_val[3]:
-    if key == "LaunchOptions" and val[0] == "str":
-        launch = val
-        break
-
-if launch is None:
-    if mode == "clear":
-        print("unchanged")
-        sys.exit(0)
-    line = '\n\t\t\t"LaunchOptions"\t\t"%s"\n' % escape(prefix + " %command%")
-    insert_at = app_val[2] - 1
-    write(text[:insert_at] + line + text[insert_at:])
-    sys.exit(0)
-
-existing = unescape(text[launch[1] + 1 : launch[2] - 1])
-if mode == "set":
-    merged, did = merge_set(existing, prefix)
-else:
-    merged, did = merge_clear(existing)
-if not did:
+if text == snapshot:
     print("unchanged")
     sys.exit(0)
-if merged == "":
-    key_at = text.rfind('"LaunchOptions"', app_val[1], launch[1])
-    if key_at < 0:
-        print("skipped-shape launch key")
-        sys.exit(3)
-    line_start = text.rfind("\n", app_val[1], key_at)
-    if line_start < 0:
-        line_start = key_at
-    write(text[:line_start] + text[launch[2] :])
-    sys.exit(0)
-write(text[: launch[1] + 1] + escape(merged) + text[launch[2] - 1 :])
+tmp = file.with_name(file.name + ".ascension-tmp")
+tmp.write_text(text, encoding="utf-8")
+tmp.replace(file)
+print("updated")
 PY
   )
   status=$?
@@ -469,10 +556,118 @@ PY
   esac
 }
 
+csv_ids() {
+  local IFS=,
+  if [ "$#" -eq 0 ]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "$*"
+}
+
+save_enabled() {
+  local dir id
+  [ "$DRY" -eq 1 ] && return 0
+  dir="$HOME/.local/share/ascension"
+  mkdir -p "$dir"
+  : > "$(enabled_file)"
+  for id in "${SELECTED_IDS[@]+"${SELECTED_IDS[@]}"}"; do
+    printf '%s\n' "$id" >> "$(enabled_file)"
+  done
+}
+
+load_enabled() {
+  local id
+  SELECTED_IDS=()
+  [ -f "$(enabled_file)" ] || return 0
+  while IFS= read -r id; do
+    case "$id" in
+      '' | *[!0-9]*) continue ;;
+    esac
+    SELECTED_IDS+=("$id")
+  done < "$(enabled_file)"
+}
+
+build_clear_ids() {
+  local appid name dir flag id keep
+  CLEAR_IDS=()
+  [ -n "${GAMES_TSV:-}" ] && [ -f "$GAMES_TSV" ] || return 0
+  while IFS=$'\t' read -r appid name dir flag; do
+    [ "${flag:-}" = "1" ] || continue
+    keep=0
+    for id in "${SELECTED_IDS[@]+"${SELECTED_IDS[@]}"}"; do
+      [ "$id" = "$appid" ] && keep=1
+    done
+    [ "$keep" -eq 0 ] && CLEAR_IDS+=("$appid")
+  done < "$GAMES_TSV"
+  return 0
+}
+
+choose_games() {
+  local py id out status
+  SELECTED_IDS=()
+  if [ -n "${ASCENSION_GAMES:-}" ]; then
+    local part
+    IFS=', ' read -r -a part <<< "${ASCENSION_GAMES//,/ }"
+    for id in "${part[@]+"${part[@]}"}"; do
+      case "$id" in
+        '' | *[!0-9]*) continue ;;
+      esac
+      SELECTED_IDS+=("$id")
+    done
+    return 0
+  fi
+  if [ "$MODE" = "launch" ]; then
+    load_enabled
+    if [ "${#SELECTED_IDS[@]}" -eq 0 ]; then
+      SELECTED_IDS=("$APPID")
+    fi
+    return 0
+  fi
+  if [ "$DRY" -eq 1 ]; then
+    say "would open the game picker"
+    if [ -f "${GAMES_TSV:-}" ]; then
+      while IFS=$'\t' read -r id name dir flag; do
+        [ -n "${id:-}" ] || continue
+        say "  ${name:-$id} ($id)"
+      done < "$GAMES_TSV"
+    fi
+    return 0
+  fi
+  py=$(picker_py) || die "picker.py is missing"
+  if [ ! -t 0 ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    SELECTED_IDS=("$APPID")
+    say "No display. Using AION 2 (${APPID}) only. Set ASCENSION_GAMES to choose others."
+    return 0
+  fi
+  say "Pick the games in the Ascension window."
+  set +e
+  out=$(ASCENSION_NO_GUI="${ASCENSION_NO_GUI:-0}" python3 "$py" pick < "$GAMES_TSV")
+  status=$?
+  set -e
+  if [ "$status" -eq 3 ]; then
+    say "Cancelled. Nothing was changed."
+    exit 0
+  fi
+  [ "$status" -eq 0 ] || die "game picker failed"
+  while IFS= read -r id; do
+    case "$id" in
+      '' | *[!0-9]*) continue ;;
+    esac
+    SELECTED_IDS+=("$id")
+  done <<< "$out"
+}
+
 apply_launch_options() {
-  local f
+  local f set_csv clear_csv
+  set_csv=$(csv_ids "${SELECTED_IDS[@]+"${SELECTED_IDS[@]}"}")
+  clear_csv=$(csv_ids "${CLEAR_IDS[@]+"${CLEAR_IDS[@]}"}")
   if [ "${#VDF_FILES[@]}" -eq 0 ]; then
-    say "No Steam user config to edit. Install AION 2 in Steam, quit Steam, run ascension again."
+    say "No Steam user config to edit. Install a game in Steam, quit Steam, then run ascension again."
+    return 0
+  fi
+  if [ -z "$set_csv" ] && [ -z "$clear_csv" ]; then
+    say "No games ticked, and none were using the layer."
     return 0
   fi
   if steam_running; then
@@ -480,14 +675,16 @@ apply_launch_options() {
       say "Steam is open. Would apply the launch option after Steam exits."
       return 0
     fi
+    save_enabled
     queue_waiter
     say "Steam is open, so its config is still in memory."
     say "Quit Steam fully (tray icon too). Ascension writes the launch option as it exits."
     return 0
   fi
   for f in "${VDF_FILES[@]}"; do
-    vdf_patch "$f" set
+    vdf_patch "$f" "$set_csv" "$clear_csv"
   done
+  save_enabled
 }
 
 queue_waiter() {
@@ -529,11 +726,11 @@ drop_global_pin() {
   fi
   if [ "$DRY" -eq 1 ]; then
     say "would remove the session-wide Vulkan pin at $pin"
-    say "The layer then turns on only for AION 2."
+    say "The layer then turns on only for the games you tick."
     return 0
   fi
   rm -f "$pin"
-  say "Removed the session-wide Vulkan pin. Only AION 2 turns the layer on."
+  say "Removed the session-wide Vulkan pin. Only ticked games turn the layer on."
 }
 
 resolve_bundled_tarball() {
@@ -740,8 +937,8 @@ install_desktop_entry() {
 [Desktop Entry]
 Type=Application
 Name=Ascension
-GenericName=AION 2 DLSS 5
-Comment=Re-apply Lecram DLSS 5 for AION 2 without touching the game folder
+GenericName=DLSS 5 layer
+Comment=Turn the DLSS 5 layer on for Steam games without touching their folders
 Exec=bash -c '$HOME/.local/bin/ascension; printf "\\nPress Enter to close.\\n"; read -r _'
 Terminal=true
 Categories=Game;
@@ -755,9 +952,12 @@ copy_self() {
     return 0
   fi
   if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ]; then
-    mkdir -p "$HOME/.local/bin"
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/share/ascension"
     cp -f "$0" "$HOME/.local/bin/ascension"
     chmod 755 "$HOME/.local/bin/ascension"
+    if py=$(picker_py); then
+      cp -f "$py" "$HOME/.local/share/ascension/picker.py"
+    fi
   fi
 }
 
@@ -789,8 +989,11 @@ remove_launch_options() {
     return 0
   fi
   for f in "${VDF_FILES[@]}"; do
-    vdf_patch "$f" clear
+    vdf_patch "$f" "" "*"
   done
+  if [ "$DRY" -eq 0 ]; then
+    rm -f "$(enabled_file)"
+  fi
 }
 
 purge_layer() {
@@ -853,13 +1056,15 @@ prepare_import_dir() {
 
 cmd_install() {
   local missing=0
-  say "Ascension — Lecram DLSS 5 for AION 2"
-  say "Nothing is written into the game folder."
+  say "Ascension — Lecram DLSS 5 for Steam games"
+  say "Nothing is written into a game folder."
   if [ "$DRY" -eq 1 ]; then
     say "Dry-run. Nothing will be changed."
   fi
   set_launch_prefix
   discover_steam
+  choose_games
+  build_clear_ids
   prepare_import_dir
   if DLL_PATH=$(find_dll); then
     say "Found nvngx_dlssnr.dll outside the game."
@@ -884,8 +1089,16 @@ cmd_install() {
   install_autostart
   install_desktop_entry
   apply_launch_options
-  say "Launch option for AION 2 only:"
-  say "  ${LAUNCH_PREFIX} %command%"
+  if [ "${#SELECTED_IDS[@]}" -eq 0 ]; then
+    say "No game is ticked. The layer stays off until you tick one."
+  else
+    say "Launch option, only on the ticked games:"
+    say "  ${LAUNCH_PREFIX} %command%"
+    local id
+    for id in "${SELECTED_IDS[@]}"; do
+      say "  app $id"
+    done
+  fi
   if [ "$DRY" -eq 0 ] && [ -x "$(helper_bin)" ]; then
     say "---- dlssnr-helper doctor ----"
     "$(helper_bin)" doctor || say "doctor reported something missing (see above)"
@@ -895,29 +1108,52 @@ cmd_install() {
     exit 2
   fi
   if [ "$DRY" -eq 0 ]; then
-    say "Done. Launch AION 2 from Steam after Steam has been restarted once."
+    say "Done. Quit Steam once if it was open, then launch a ticked game from Steam."
+    say "Live settings: dlssnr-gui (a window, not an in-game menu)."
     say "Undo with: ascension --remove"
   fi
 }
 
 self_test() {
-  local tmp home steam game user before after count
+  local tmp home steam game portal user before after count portal_before
   command -v python3 >/dev/null 2>&1 || die "python3 is required"
   [ -n "${ASCENSION_TARBALL:-}" ] || die "self-test needs ASCENSION_TARBALL"
   tmp=$(mktemp -d)
   home="$tmp/home"
   steam="$home/.local/share/Steam"
   game="$steam/steamapps/common/AION2"
+  portal="$steam/steamapps/common/Portal"
   user="$steam/userdata/1000/config"
-  mkdir -p "$game" "$user" "$home/Downloads" "$steam/userdata/1001/config" "$steam/steamapps"
+  mkdir -p "$game" "$portal" "$user" "$home/Downloads" "$steam/userdata/1001/config" "$steam/steamapps"
   printf 'sentinel\n' > "$game/DO_NOT_TOUCH"
+  printf 'portal-sentinel\n' > "$portal/DO_NOT_TOUCH"
   printf 'MZ-fake-lecram-dll' > "$home/Downloads/nvngx_dlssnr.dll"
   printf 'not-a-vdf\0binary\n' > "$steam/userdata/1001/config/localconfig.vdf"
   cat > "$steam/steamapps/appmanifest_${APPID}.acf" <<EOF
 "AppState"
 {
 	"appid"		"$APPID"
+	"name"		"AION 2"
 	"installdir"		"AION2"
+	"StateFlags"		"4"
+}
+EOF
+  cat > "$steam/steamapps/appmanifest_220.acf" <<EOF
+"AppState"
+{
+	"appid"		"220"
+	"name"		"Half-Life 2"
+	"installdir"		"Portal"
+	"StateFlags"		"4"
+}
+EOF
+  cat > "$steam/steamapps/appmanifest_228980.acf" <<EOF
+"AppState"
+{
+	"appid"		"228980"
+	"name"		"Steamworks Common Redistributables"
+	"installdir"		"Steamworks Shared"
+	"StateFlags"		"4"
 }
 EOF
   cat > "$steam/steamapps/libraryfolders.vdf" <<EOF
@@ -955,6 +1191,7 @@ EOF
 }
 EOF
   before=$(sha256sum "$game/DO_NOT_TOUCH" | awk '{print $1}')
+  portal_before=$(sha256sum "$portal/DO_NOT_TOUCH" | awk '{print $1}')
   local bin_before
   bin_before=$(sha256sum "$steam/userdata/1001/config/localconfig.vdf" | awk '{print $1}')
 
@@ -965,22 +1202,27 @@ EOF
     ASCENSION_TARBALL="$ASCENSION_TARBALL" \
     ASCENSION_SKIP_HELPER_START=1 \
     ASCENSION_SKIP_SYSTEMD=1 \
+    ASCENSION_GAMES=3393110,220 \
+    ASCENSION_NO_GUI=1 \
     DLSSNR_UID=97531 \
     bash "$0"
   [ "$?" -eq 0 ]
 
   after=$(sha256sum "$game/DO_NOT_TOUCH" | awk '{print $1}')
   [ "$before" = "$after" ] || die "self-test: game file changed"
+  [ "$(sha256sum "$portal/DO_NOT_TOUCH" | awk '{print $1}')" = "$portal_before" ] || die "self-test: second game changed"
   [ ! -e "$game/nvngx_dlssnr.dll" ] || die "self-test: dll landed in the game"
+  [ ! -e "$portal/nvngx_dlssnr.dll" ] || die "self-test: dll landed in the second game"
   [ -f "$home/.local/share/dlssnr/binaries/nvngx_dlssnr.dll" ] || die "self-test: dll was not imported"
   grep -q 'VKLayer_DLSS5=1' "$user/localconfig.vdf" || die "self-test: launch option missing"
+  grep -q '"220"' "$user/localconfig.vdf" || die "self-test: second game was not added"
   grep -q 'gamemoderun %command%' "$user/localconfig.vdf" || die "self-test: other game launch option changed"
   [ ! -f "$home/.config/environment.d/dlssnr.conf" ] || die "self-test: global Vulkan pin left behind"
   local bin_after
   bin_after=$(sha256sum "$steam/userdata/1001/config/localconfig.vdf" | awk '{print $1}')
   [ "$bin_before" = "$bin_after" ] || die "self-test: binary steam config was rewritten"
   count=$(grep -c 'VKLayer_DLSS5=1' "$user/localconfig.vdf")
-  [ "$count" -eq 1 ] || die "self-test: launch option duplicated on first run"
+  [ "$count" -eq 2 ] || die "self-test: expected two games, saw $count"
 
   HOME="$home" \
     XDG_CONFIG_HOME="$home/.config" \
@@ -989,10 +1231,12 @@ EOF
     ASCENSION_TARBALL="$ASCENSION_TARBALL" \
     ASCENSION_SKIP_HELPER_START=1 \
     ASCENSION_SKIP_SYSTEMD=1 \
+    ASCENSION_GAMES=3393110,220 \
+    ASCENSION_NO_GUI=1 \
     DLSSNR_UID=97531 \
     bash "$0"
   count=$(grep -c 'VKLayer_DLSS5=1' "$user/localconfig.vdf")
-  [ "$count" -eq 1 ] || die "self-test: launch option duplicated on second run"
+  [ "$count" -eq 2 ] || die "self-test: launch option duplicated on second run"
 
   local stamp stamp2
   stamp=$(sha256sum "$user/localconfig.vdf" "$game/DO_NOT_TOUCH" | sha256sum)
@@ -1001,6 +1245,7 @@ EOF
     XDG_DATA_HOME="$home/.local/share" \
     XDG_STATE_HOME="$home/.local/state" \
     ASCENSION_TARBALL="$ASCENSION_TARBALL" \
+    ASCENSION_NO_GUI=1 \
     bash "$0" --dry-run >/dev/null
   stamp2=$(sha256sum "$user/localconfig.vdf" "$game/DO_NOT_TOUCH" | sha256sum)
   [ "$stamp" = "$stamp2" ] || die "self-test: dry-run wrote files"
@@ -1011,6 +1256,7 @@ EOF
     XDG_STATE_HOME="$home/.local/state" \
     ASCENSION_TARBALL="$ASCENSION_TARBALL" \
     ASCENSION_SKIP_SYSTEMD=1 \
+    ASCENSION_NO_GUI=1 \
     bash "$0" --remove >/dev/null
   if grep -q 'VKLayer_DLSS5' "$user/localconfig.vdf"; then
     die "self-test: remove left the launch option"
@@ -1018,6 +1264,7 @@ EOF
   grep -q 'gamemoderun %command%' "$user/localconfig.vdf" || die "self-test: remove ate the other game"
   after=$(sha256sum "$game/DO_NOT_TOUCH" | awk '{print $1}')
   [ "$before" = "$after" ] || die "self-test: remove touched the game"
+  [ "$(sha256sum "$portal/DO_NOT_TOUCH" | awk '{print $1}')" = "$portal_before" ] || die "self-test: remove touched the second game"
   rm -rf "$tmp" "/tmp/dlssnr-97531"
   say "self-test ok"
 }
@@ -1044,19 +1291,21 @@ main() {
   case "$MODE" in
     install) cmd_install ;;
     remove)
-      say "Removing Ascension from AION 2. The game folder is not touched."
+      say "Removing the layer from ticked games. Game folders are not touched."
       discover_steam
       stop_helper
       remove_launch_options
       say "Launch option cleared. The layer is still installed. ascension --purge removes it."
       ;;
     purge)
-      say "Purging the layer. The game folder is not touched."
+      say "Purging the layer. Game folders are not touched."
       discover_steam
       purge_layer
       ;;
     launch)
       discover_steam
+      choose_games
+      build_clear_ids
       apply_launch_options
       ;;
   esac

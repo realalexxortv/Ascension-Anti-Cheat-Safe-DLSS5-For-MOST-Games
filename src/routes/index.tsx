@@ -7,12 +7,12 @@ import { dryRunAscension } from "@/lib/ascension.functions";
 export const Route = createFileRoute("/")({ component: Home });
 
 const PLAN = `ascension
-installs Lecram's DLSS 5 for AION 2
-writes nothing inside the game folder
+turns the DLSS 5 layer on for Steam games you tick
+writes nothing inside a game folder
 
   1. DLSS5VKLayer under ~/.local
   2. nvngx_dlssnr.dll into the helper, not the game
-  3. Steam app 3393110 gets VKLayer_DLSS5=1 %command%`;
+  3. each ticked game gets VKLayer_DLSS5=1 %command%`;
 
 function Home() {
   const runDry = useServerFn(dryRunAscension);
@@ -36,14 +36,14 @@ function Home() {
     <main className="min-h-dvh bg-bg text-ink">
       <div className="mx-auto flex w-full max-w-2xl flex-col px-5 py-10 sm:px-8 sm:py-14">
         <p className="text-xs font-medium tracking-widest text-gold uppercase">
-          Linux · AION 2
+          Linux · Steam
         </p>
         <h1 className="mt-3 font-display text-5xl leading-none text-ink sm:text-6xl">
           Ascension
         </h1>
         <p className="mt-4 max-w-prose text-base leading-relaxed text-muted">
-          Double-click the AppImage. The Vulkan layer is packed inside it, and the
-          AION 2 folder is not touched.
+          Double-click the AppImage, then tick the Steam games you want. The
+          Vulkan layer stays in your home directory. Game folders are not touched.
         </p>
 
         <ol className="mt-8 border-y border-line">
@@ -56,8 +56,8 @@ function Home() {
           <Step
             n="02"
             icon={<Layers className="size-5" aria-hidden="true" />}
-            title="Layer is inside the AppImage"
-            detail="DLSS5VKLayer ships in the file you download. It installs under ~/.local. Steam only gets an environment variable on AION 2."
+            title="Pick installed Steam games"
+            detail="A window lists the games Steam has installed. Ticked ones get a launch option only. Unticked ones are left alone."
           />
           <Step
             n="03"
@@ -87,9 +87,11 @@ function Home() {
         <p className="mt-3 text-sm leading-relaxed text-muted">
           On your Linux PC, double-click{" "}
           <span className="text-ink">Ascension-x86_64.AppImage</span>. If the
-          file browser will not run it, mark it executable once. Quit Steam
-          fully once so the launch option sticks, then start AION 2 from Steam.
-          The helper needs Proton-GE, Proton-CachyOS, Wine-GE, or system Wine.
+          file browser will not run it, mark it executable once. Tick the games,
+          quit Steam fully once so the launch options stick, then start them
+          from Steam. The helper needs Proton-GE, Proton-CachyOS, Wine-GE, or
+          system Wine. Live tweaks are in{" "}
+          <span className="text-ink">dlssnr-gui</span>, a separate window.
         </p>
 
         <aside className="mt-8 border border-line bg-raise p-4">
