@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Ascension",
+      "hasCanvas": false,
+      "bodyTextLen": 1248,
+      "bodyTextHash": "234ad1ab1cfe0e37d7c9abf46b5a8c93b5722105bcb3032d45284eab64ea220d",
+      "bodyTextPrefix": "LINUX · AION 2 Ascension One command installs Lecram's DLSS 5 mo",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Ascension",
+      "hasCanvas": false,
+      "bodyTextLen": 1248,
+      "bodyTextHash": "234ad1ab1cfe0e37d7c9abf46b5a8c93b5722105bcb3032d45284eab64ea220d",
+      "bodyTextPrefix": "LINUX · AION 2 Ascension One command installs Lecram's DLSS 5 mo",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
