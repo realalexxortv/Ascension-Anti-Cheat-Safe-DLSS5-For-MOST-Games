@@ -1,0 +1,13 @@
+Ascension bundles the unmodified DLSS5VKLayer 0.3.1-2 release
+(dlssnr-0.3.1-2-linux-x86_64.tar.gz).
+
+That project is licensed under the GNU Affero General Public License v3.0.
+The license text is DLSS5VKLayer-LICENSE.txt in this directory.
+Corresponding source:
+https://github.com/bmitch87/DLSS5VKLayer/tree/0.3.1-2
+
+Ascension does not modify those files. DXVK components inside the upstream
+tarball keep the license shipped with that tarball (dxvk-license.txt).
+
+NVIDIA NGX binaries, including nvngx_dlssnr.dll and Lecram's build of it,
+are not included. They are not free to redistribute.

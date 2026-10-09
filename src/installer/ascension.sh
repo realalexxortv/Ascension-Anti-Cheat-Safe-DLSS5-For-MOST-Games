@@ -536,6 +536,34 @@ drop_global_pin() {
   say "Removed the session-wide Vulkan pin. Only AION 2 turns the layer on."
 }
 
+resolve_bundled_tarball() {
+  local candidate self dir
+  if [ -n "${ASCENSION_TARBALL:-}" ] && [ -f "$ASCENSION_TARBALL" ]; then
+    return 0
+  fi
+  for candidate in \
+    "${APPDIR:-}/usr/share/ascension/dlssnr-${PINNED_TAG}-linux-x86_64.tar.gz"; do
+    if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+      ASCENSION_TARBALL="$candidate"
+      return 0
+    fi
+  done
+  if [ -n "${0:-}" ] && [ -f "$0" ]; then
+    self=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    dir=$(dirname "$self")
+    for candidate in \
+      "$dir/dlssnr-${PINNED_TAG}-linux-x86_64.tar.gz" \
+      "$dir/../share/ascension/dlssnr-${PINNED_TAG}-linux-x86_64.tar.gz" \
+      "$dir/../../payload/dlssnr-${PINNED_TAG}-linux-x86_64.tar.gz"; do
+      if [ -f "$candidate" ]; then
+        ASCENSION_TARBALL=$(readlink -f "$candidate")
+        return 0
+      fi
+    done
+  fi
+  return 1
+}
+
 install_layer() {
   local tag url tarball dest work inst current
   tag="$PINNED_TAG"
@@ -549,8 +577,13 @@ install_layer() {
     drop_global_pin
     return 0
   fi
+  resolve_bundled_tarball || true
   if [ "$DRY" -eq 1 ]; then
-    say "would install DLSS5VKLayer $tag from GitHub into ~/.local (user install, no root)"
+    if [ -n "${ASCENSION_TARBALL:-}" ]; then
+      say "would install DLSS5VKLayer $tag from the bundled package (no download)"
+    else
+      say "would install DLSS5VKLayer $tag from GitHub into ~/.local (user install, no root)"
+    fi
     say "would remove the session-wide Vulkan pin so other games stay untouched"
     return 0
   fi
@@ -589,7 +622,8 @@ if tag and url:
   mkdir -p "$dest"
   if [ -n "${ASCENSION_TARBALL:-}" ]; then
     tarball="$ASCENSION_TARBALL"
-    say "using local tarball $tarball"
+    say "using bundled layer $tarball"
+    echo "$PINNED_SHA  $tarball" | sha256sum -c -
   else
     tarball="$dest/$(basename "$url")"
     if [ ! -f "$tarball" ]; then

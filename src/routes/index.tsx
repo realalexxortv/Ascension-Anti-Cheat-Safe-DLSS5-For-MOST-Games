@@ -42,9 +42,8 @@ function Home() {
           Ascension
         </h1>
         <p className="mt-4 max-w-prose text-base leading-relaxed text-muted">
-          One command installs Lecram's DLSS 5 mod through the DLSS5 Vulkan
-          layer. The AION 2 folder is not touched, so the file check has nothing
-          new to find.
+          Double-click the AppImage. The Vulkan layer is packed inside it, and the
+          AION 2 folder is not touched.
         </p>
 
         <ol className="mt-8 border-y border-line">
@@ -57,8 +56,8 @@ function Home() {
           <Step
             n="02"
             icon={<Layers className="size-5" aria-hidden="true" />}
-            title="Layer lives in your home directory"
-            detail="DLSS5VKLayer and the helper stay under ~/.local. Steam only gets an environment variable on AION 2."
+            title="Layer is inside the AppImage"
+            detail="DLSS5VKLayer ships in the file you download. It installs under ~/.local. Steam only gets an environment variable on AION 2."
           />
           <Step
             n="03"
@@ -70,8 +69,8 @@ function Home() {
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <a
-            href="/api/ascension"
-            download="ascension"
+            href="/Ascension-x86_64.AppImage"
+            download="Ascension-x86_64.AppImage"
             className="inline-flex h-12 cursor-pointer items-center justify-center bg-gold px-5 text-sm font-semibold text-gold-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold"
           >
             Download Ascension
@@ -86,11 +85,11 @@ function Home() {
           </button>
         </div>
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          On the Linux PC where AION 2 is installed, run{" "}
-          <span className="text-ink">bash ascension</span>. No window. Quit Steam
-          fully once so the launch option sticks, then start the game from Steam.
-          Needs Proton-GE, Proton-CachyOS, Wine-GE, or system Wine — not official
-          Proton.
+          On your Linux PC, double-click{" "}
+          <span className="text-ink">Ascension-x86_64.AppImage</span>. If the
+          file browser will not run it, mark it executable once. Quit Steam
+          fully once so the launch option sticks, then start AION 2 from Steam.
+          The helper needs Proton-GE, Proton-CachyOS, Wine-GE, or system Wine.
         </p>
 
         <aside className="mt-8 border border-line bg-raise p-4">
