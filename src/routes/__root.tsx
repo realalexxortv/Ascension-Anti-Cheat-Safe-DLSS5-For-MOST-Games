@@ -14,7 +14,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "One-command Linux installer for Lecram's DLSS 5 mod on AION 2. The game folder is never modified.",
+          "Linux installer that turns Lecram's DLSS 5 layer on for the Steam games you pick. Game folders are never modified.",
       },
       { name: "theme-color", content: "#10140f" },
     ],

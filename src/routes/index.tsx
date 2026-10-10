@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useState, type ReactNode } from "react";
-import { FileDown, FolderX, Layers } from "lucide-react";
-import { dryRunAscension } from "@/lib/ascension.functions";
+import { type ReactNode } from "react";
+import { FileDown, FolderX, Play } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -15,23 +13,6 @@ writes nothing inside a game folder
   3. each ticked game gets VKLayer_DLSS5=1 %command%`;
 
 function Home() {
-  const runDry = useServerFn(dryRunAscension);
-  const [log, setLog] = useState(PLAN);
-  const [phase, setPhase] = useState<"idle" | "run" | "done" | "error">("idle");
-
-  async function onDryRun() {
-    setPhase("run");
-    try {
-      const result = await runDry();
-      setLog(result.output || "Dry-run finished with no output.");
-      setPhase("done");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Dry-run failed.";
-      setLog(message);
-      setPhase("error");
-    }
-  }
-
   return (
     <main className="min-h-dvh bg-bg text-ink">
       <div className="mx-auto flex w-full max-w-2xl flex-col px-5 py-10 sm:px-8 sm:py-14">
@@ -42,8 +23,9 @@ function Home() {
           Ascension
         </h1>
         <p className="mt-4 max-w-prose text-base leading-relaxed text-muted">
-          Double-click the AppImage, then tick the Steam games you want. The
-          Vulkan layer stays in your home directory. Game folders are not touched.
+          Get Lecram's DLL, download the AppImage, then tick the Steam games
+          you want. The Vulkan layer stays in your home directory. Game folders
+          are not touched.
         </p>
 
         <ol className="mt-8 border-y border-line">
@@ -55,19 +37,33 @@ function Home() {
           />
           <Step
             n="02"
-            icon={<Layers className="size-5" aria-hidden="true" />}
-            title="Pick installed Steam games"
-            detail="A window lists the games Steam has installed. Ticked ones get a launch option only. Unticked ones are left alone."
+            icon={<FileDown className="size-5" aria-hidden="true" />}
+            title="Download Lecram's DLL"
+            detail={
+              <>
+                Get{" "}
+                <span className="text-ink">nvngx_dlssnr.dll</span> from the{" "}
+                <a
+                  href="https://discord.com/invite/renodx"
+                  className="text-gold underline decoration-gold/40 underline-offset-2"
+                >
+                  RenoDX Discord
+                </a>
+                , in the DLSS 5 channel. Put that file in{" "}
+                <span className="text-ink">~/.local/share/ascension/import</span>{" "}
+                or Downloads.
+              </>
+            }
           />
           <Step
             n="03"
-            icon={<FileDown className="size-5" aria-hidden="true" />}
-            title="You supply Lecram's DLL"
-            detail="Drop nvngx_dlssnr.dll into ~/.local/share/ascension/import or Downloads. Ascension does not download it."
+            icon={<Play className="size-5" aria-hidden="true" />}
+            title="Launch the app"
+            detail="Double-click the AppImage and tick the Steam games you want. Ticked ones get a launch option only. Unticked ones are left alone."
           />
         </ol>
 
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+        <div className="mt-8">
           <a
             href="/Ascension-x86_64.AppImage"
             download="Ascension-x86_64.AppImage"
@@ -75,14 +71,6 @@ function Home() {
           >
             Download Ascension
           </a>
-          <button
-            type="button"
-            onClick={onDryRun}
-            disabled={phase === "run"}
-            className="inline-flex h-12 items-center justify-center border border-line bg-raise px-5 text-sm font-medium text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-60"
-          >
-            {phase === "run" ? "Running dry-run…" : "Dry-run the plan"}
-          </button>
         </div>
         <p className="mt-3 text-sm leading-relaxed text-muted">
           On your Linux PC, double-click{" "}
@@ -106,12 +94,12 @@ function Home() {
           </p>
         </aside>
 
-        <section className="mt-6 border border-line bg-raise" aria-live="polite">
+        <section className="mt-6 border border-line bg-raise">
           <p className="border-b border-line px-4 py-2 text-xs tracking-widest text-muted uppercase">
-            {phase === "done" ? "Dry-run on an empty demo account" : "What the command does"}
+            What the command does
           </p>
           <pre className="max-h-80 overflow-auto px-4 py-4 text-sm leading-relaxed break-all whitespace-pre-wrap text-ink">
-            {log}
+            {PLAN}
           </pre>
         </section>
       </div>
@@ -128,7 +116,7 @@ function Step({
   n: string;
   icon: ReactNode;
   title: string;
-  detail: string;
+  detail: ReactNode;
 }) {
   return (
     <li className="flex gap-4 border-b border-line py-4 last:border-b-0">
