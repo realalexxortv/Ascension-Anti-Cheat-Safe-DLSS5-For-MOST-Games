@@ -44,14 +44,13 @@ function Home() {
                 Get{" "}
                 <span className="text-ink">nvngx_dlssnr.dll</span> from the{" "}
                 <a
-                  href="https://discord.com/invite/renodx"
+                  href="https://github.com/RankFTW/rhi-repo/releases/download/dlssnr-310.8.Lecram/nvngx_dlssnr_310.8.Lecram.zip"
                   className="text-gold underline decoration-gold/40 underline-offset-2"
                 >
-                  RenoDX Discord
+                  DLSSNR
                 </a>
-                , in the DLSS 5 channel. Put that file in{" "}
-                <span className="text-ink">~/.local/share/ascension/import</span>{" "}
-                or Downloads.
+                , put the nvngx_dlssnr.dll in{" "}
+                <span className="text-ink">Downloads</span>{" "}
               </>
             }
           />
